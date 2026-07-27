@@ -41,7 +41,7 @@ Outputs land in `results/`: `counts/gene_counts.tsv`, `qc/multiqc_report.html`, 
 
 The SRA's metadata is queryable in BigQuery (`nih-sra-datastore.sra.metadata`), so run accessions, library layout, and submitter sample attributes can be pulled with a query instead of clicked out of the Run Selector. `resources/sra_metadata.sql` does this and normalises the result into the four columns the workflow requires: `run`, `sample`, `condition`, `library_layout`.
 
-The catch worth knowing: sample attributes are submitter-defined key/value pairs, not fixed columns, so `treatment_sam` in one study is `condition_sam` or `genotype_sam` in the next. Run the audit query first — it lists every attribute key a study actually used, with example values — then edit the `COALESCE` block to match. Guessing here is how sample sheets end up quietly mislabelled, which is the kind of error that survives all the way to a volcano plot.
+Importantly, sample attributes are submitter-defined key/value pairs, not fixed columns, so, e.g., `treatment_sam` in one study is `condition_sam` or `genotype_sam` in the next. Run the audit query first, as it lists every attribute key a study actually used, with example values, then edit the `COALESCE` block to match. It is critical at this point to ensure proper labeling.
 
 ```bash
 python workflow/scripts/fetch_sra_metadata.py --study SRP123456 --audit
