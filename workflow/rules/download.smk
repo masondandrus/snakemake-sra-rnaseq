@@ -44,7 +44,7 @@ rule fasterq_dump_pe:
     shell:
         """
         (
-        tmp=$(mktemp -d)
+        mkdir -p results/scratch && tmp=$(mktemp -d -p results/scratch)
         fasterq-dump {wildcards.run} \
             --split-3 \
             --threads {threads} \
@@ -75,7 +75,7 @@ rule fasterq_dump_se:
     shell:
         """
         (
-        tmp=$(mktemp -d)
+        mkdir -p results/scratch && tmp=$(mktemp -d -p results/scratch)
         fasterq-dump {wildcards.run} \
             --split-3 \
             --threads {threads} \
