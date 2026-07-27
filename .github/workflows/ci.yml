@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  dry-run:
+    name: Lint and dry-run the workflow
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Snakemake
+        run: pip install "snakemake>=7.32,<9" pandas
+
+      - name: Compile-check helper scripts
+        run: python -m py_compile workflow/scripts/*.py
+
+      - name: Lint
+        run: snakemake --lint --configfile .test/config.yaml
+
+      - name: Dry run (mixed paired/single-end sample sheet)
+        run: snakemake -n --configfile .test/config.yaml --cores 1
+
+      - name: Build DAG
+        run: snakemake --configfile .test/config.yaml --dag > dag.dot
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dag
+          path: dag.dot

@@ -1,0 +1,15 @@
+results/
+resources/sra/
+resources/reference/
+logs/
+.snakemake/
+*.sra
+*.fastq
+*.fastq.gz
+.DS_Store
+__pycache__/
+*.pyc
+.Rhistory
+.RData
+.env
+*.attributes.json

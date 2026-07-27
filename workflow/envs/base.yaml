@@ -1,0 +1,8 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - curl =8.5
+  - pigz =2.8
+  - gzip =1.13
+  - python =3.11

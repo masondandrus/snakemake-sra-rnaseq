@@ -1,0 +1,7 @@
+run	sample	condition	library_layout
+SRR000001	ctrl_1	control	PAIRED
+SRR000002	ctrl_2	control	PAIRED
+SRR000003	ctrl_3	control	PAIRED
+SRR000004	trt_1	treated	PAIRED
+SRR000005	trt_2	treated	PAIRED
+SRR000006	trt_3	treated	PAIRED

@@ -1,0 +1,33 @@
+from snakemake.utils import min_version
+
+min_version("7.32.0")
+
+
+configfile: "config/config.yaml"
+
+
+include: "rules/common.smk"
+
+
+include: "rules/download.smk"
+include: "rules/qc.smk"
+include: "rules/quant.smk"
+include: "rules/de.smk"
+
+
+# ---------------------------------------------------------------------------
+# Targets
+# ---------------------------------------------------------------------------
+rule all:
+    input:
+        "results/qc/multiqc_report.html",
+        "results/counts/gene_counts.tsv",
+        "results/deseq2/dds.rds",
+        expand("results/deseq2/{contrast}.results.tsv", contrast=config["contrasts"]),
+
+
+rule quant_only:
+    """Stop after quantification — useful when you only want the count matrix."""
+    input:
+        "results/counts/gene_counts.tsv",
+        "results/qc/multiqc_report.html",
