@@ -1,0 +1,18 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base =4.3
+  - bioconductor-deseq2 =1.42
+  - bioconductor-fgsea =1.28
+  - r-msigdbr
+  - r-ggplot2 =3.5
+  - r-ggrepel
+  - r-pheatmap
+  - r-dplyr =1.1
+  - r-readr =2.1
+  - r-tibble
+  - r-rmarkdown
+  - r-knitr
+  - r-dt
+  - pandoc

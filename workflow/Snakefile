@@ -24,6 +24,7 @@ rule all:
         "results/counts/gene_counts.tsv",
         "results/deseq2/dds.rds",
         expand("results/deseq2/{contrast}.results.tsv", contrast=config["contrasts"]),
+        expand("results/report/{contrast}.report.html", contrast=config["contrasts"]),
 
 
 rule quant_only:

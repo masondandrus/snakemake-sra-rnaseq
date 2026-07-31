@@ -29,6 +29,7 @@ txi <- tximport(
   type = "salmon",
   tx2gene = t2g,
   ignoreTxVersion = TRUE,
+  dropInfReps = TRUE,
   countsFromAbundance = "lengthScaledTPM"
 )
 

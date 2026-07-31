@@ -11,6 +11,9 @@ suppressPackageStartupMessages({
 })
 
 dds <- readRDS(snakemake@input[["dds"]])
+t2g <- read.delim(snakemake@input[["tx2gene"]], stringsAsFactors = FALSE)
+# tx2gene is per-transcript; collapse to one symbol per gene
+sym <- t2g[!duplicated(t2g$gene_id), c("gene_id", "gene_symbol")]
 contrast <- unlist(snakemake@params[["contrast"]])
 alpha <- as.numeric(snakemake@params[["alpha"]])
 shrink <- snakemake@params[["shrink"]]
@@ -40,7 +43,10 @@ if (shrink != "none") {
 
 df <- as.data.frame(res)
 df$gene_id <- rownames(df)
-df <- df[order(df$padj, na.last = NA), c("gene_id", setdiff(names(df), "gene_id"))]
+df <- merge(df, sym, by = "gene_id", all.x = TRUE)
+df$gene_symbol[is.na(df$gene_symbol)] <- ""
+df <- df[order(df$padj, na.last = NA), ]
+df <- df[, c("gene_id", "gene_symbol", setdiff(names(df), c("gene_id", "gene_symbol")))]
 write.table(df, snakemake@output[["tsv"]], sep = "\t", quote = FALSE, row.names = FALSE)
 
 cat("significant at padj <", alpha, ":", sum(df$padj < alpha, na.rm = TRUE), "\n")

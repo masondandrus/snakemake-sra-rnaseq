@@ -1,0 +1,184 @@
+---
+title: "RNA-seq differential expression report"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.width = 8, fig.height = 5, dpi = 150)
+suppressPackageStartupMessages({
+  library(DESeq2)
+  library(ggplot2)
+  library(ggrepel)
+  library(pheatmap)
+  library(dplyr)
+  library(DT)
+})
+
+dds      <- readRDS(snakemake@input[["dds"]])
+vsd      <- readRDS(snakemake@input[["vst"]])
+res      <- read.delim(snakemake@input[["results"]], stringsAsFactors = FALSE)
+gsea     <- read.delim(snakemake@input[["gsea"]], stringsAsFactors = FALSE)
+contrast <- unlist(snakemake@params[["contrast"]])
+alpha    <- as.numeric(snakemake@params[["alpha"]])
+
+label <- paste(contrast[2], "vs", contrast[3])
+n_sig <- sum(res$padj < alpha, na.rm = TRUE)
+```
+
+## Summary
+
+Contrast: **`r label`** (factor `r contrast[1]`), tested at padj < `r alpha`.
+
+- Samples: **`r ncol(dds)`** (`r paste(table(colData(dds)[[contrast[1]]]), names(table(colData(dds)[[contrast[1]]])), collapse = ", ")`)
+- Genes retained after filtering: **`r nrow(dds)`**
+- Genes at padj < `r alpha`: **`r n_sig`**
+- Median library size: **`r format(round(median(colSums(counts(dds)))), big.mark = ",")`** assigned counts
+
+```{r caveat, results='asis'}
+if (n_sig < 50) {
+  cat("\n> With fewer than 50 significant genes, treat individual hits as",
+      "hypotheses rather than findings. Check the per-sample counts for any",
+      "gene before building on it — a large fold change driven by near-zero",
+      "counts in one group is common at small sample sizes.\n")
+}
+```
+
+## Sample-level diagnostics
+
+### Principal components
+
+```{r pca}
+group <- contrast[1]
+pca <- plotPCA(vsd, intgroup = group, returnData = TRUE)
+pct <- round(100 * attr(pca, "percentVar"))
+ggplot(pca, aes(PC1, PC2, colour = .data[[group]], label = name)) +
+  geom_point(size = 3) +
+  geom_text_repel(size = 3, show.legend = FALSE) +
+  labs(x = paste0("PC1: ", pct[1], "% variance"),
+       y = paste0("PC2: ", pct[2], "% variance")) +
+  theme_bw()
+```
+
+Separation by condition here means treatment is the dominant source of variance.
+Absence of separation does not by itself invalidate a short list of consistently
+changed genes — it means condition is not the largest axis of variation, which
+is common when between-animal or dissection variability is high.
+
+### Sample-to-sample distance
+
+```{r distheat, fig.height=5}
+d <- as.matrix(dist(t(assay(vsd))))
+ann <- as.data.frame(colData(dds)[, group, drop = FALSE])
+pheatmap(d, annotation_col = ann, annotation_row = ann,
+         main = "Euclidean distance on VST counts", silent = FALSE)
+```
+
+### Library size and dispersion
+
+```{r libsize, fig.height=3.5}
+ls <- data.frame(sample = colnames(dds),
+                 counts = colSums(counts(dds)),
+                 group = colData(dds)[[group]])
+ggplot(ls, aes(reorder(sample, counts), counts, fill = group)) +
+  geom_col() + coord_flip() +
+  labs(x = NULL, y = "Assigned counts") + theme_bw()
+```
+
+```{r disp, fig.height=4.5}
+plotDispEsts(dds)
+```
+
+The dispersion plot should show gene-wise estimates scattered around a smooth
+decreasing trend, with shrunken values pulled toward it. A poor fit here means
+the downstream p-values are unreliable.
+
+## Differential expression
+
+### Volcano
+
+```{r volcano, fig.height=6}
+v <- res %>%
+  filter(!is.na(padj)) %>%
+  mutate(
+    direction = case_when(
+      padj < alpha & log2FoldChange > 0 ~ "up",
+      padj < alpha & log2FoldChange < 0 ~ "down",
+      TRUE ~ "ns"
+    ),
+    lab = ifelse(rank(padj) <= 20 & padj < alpha,
+                 ifelse(gene_symbol == "", gene_id, gene_symbol), NA)
+  )
+
+ggplot(v, aes(log2FoldChange, -log10(pvalue), colour = direction)) +
+  geom_point(alpha = 0.5, size = 1.2) +
+  geom_text_repel(aes(label = lab), size = 3, max.overlaps = 30,
+                  show.legend = FALSE) +
+  scale_colour_manual(values = c(up = "#c0392b", down = "#2c7fb8", ns = "grey75")) +
+  labs(title = label, x = "log2 fold change (shrunken)") +
+  theme_bw()
+```
+
+### Top genes
+
+```{r toptable}
+top <- res %>%
+  filter(!is.na(padj)) %>%
+  arrange(padj) %>%
+  head(50) %>%
+  mutate(across(c(baseMean, log2FoldChange, lfcSE), ~ round(.x, 3)),
+         across(c(pvalue, padj), ~ signif(.x, 3)))
+datatable(top, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE)
+```
+
+### Expression of top hits
+
+```{r hitheat, fig.height=7}
+sig <- res %>% filter(!is.na(padj)) %>% arrange(padj) %>% head(30)
+if (nrow(sig) >= 2) {
+  m <- assay(vsd)[sig$gene_id, , drop = FALSE]
+  rownames(m) <- ifelse(sig$gene_symbol == "", sig$gene_id, sig$gene_symbol)
+  pheatmap(m, scale = "row", annotation_col = ann,
+           main = "Top genes by padj (VST, row-scaled)",
+           fontsize_row = 8)
+} else {
+  cat("Fewer than two genes passed filtering; heatmap skipped.")
+}
+```
+
+Row-scaled, so this shows relative pattern rather than absolute level. Genes
+whose apparent effect comes from a single sample are visible immediately here.
+
+## Gene set enrichment
+
+Rank-based GSEA over the full gene list, ranked by
+`sign(log2FC) * -log10(p)`. This uses every gene rather than only those passing
+the significance threshold, which matters when that list is short.
+
+```{r gseaplot, fig.height=9}
+knitr::include_graphics(file.path(getwd(), snakemake@input[["gsea_plot"]]))
+```
+
+```{r gseatable}
+gt <- gsea %>%
+  filter(!is.na(padj)) %>%
+  arrange(padj) %>%
+  select(collection, pathway, NES, pval, padj, size) %>%
+  head(50) %>%
+  mutate(NES = round(NES, 3), across(c(pval, padj), ~ signif(.x, 3)))
+datatable(gt, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE)
+```
+
+## Provenance
+
+```{r prov}
+cat("Design:      ", deparse(design(dds)), "\n")
+cat("Contrast:    ", paste(contrast, collapse = " / "), "\n")
+cat("Generated:   ", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
+sessionInfo()
+```

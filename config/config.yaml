@@ -1,39 +1,38 @@
-# ---------------------------------------------------------------------------
-# Sample sheet: one row per SRA run.
-# Required columns: run, sample, condition, library_layout (PAIRED|SINGLE)
-# Additional columns are carried into colData and can be used in the design.
-# ---------------------------------------------------------------------------
+# GSE42805 — chronic cocaine vs saline, mouse nucleus accumbens
+# Feng et al. (2014) Genome Biology. 3 v 3, 101 bp single-end.
 samples: "config/samples.tsv"
 
 sra:
-  # fasterq-dump aborts on runs larger than this; raise for deep-sequenced data.
   max_size: "50g"
 
 reference:
-  # GENCODE human v45. Swap both URLs together — the decoy index needs the
-  # genome build that matches the transcriptome annotation.
-  transcriptome_url: "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_45/gencode.v45.transcripts.fa.gz"
-  genome_url: "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_45/GRCh38.primary_assembly.genome.fa.gz"
+  transcriptome_url: "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M39/gencode.vM39.transcripts.fa.gz"
+  genome_url: "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M39/GRCm39.primary_assembly.genome.fa.gz"
 
 fastp:
-  # --qualified_quality_phred 20, minimum length 30 after trimming
   extra: "--qualified_quality_phred 20 --length_required 30"
 
 salmon:
-  kmer: 31          # drop to 23-25 for read lengths under ~50 bp
-  libtype: "A"      # 'A' = infer automatically; check lib_format_counts.json
-  extra: "--validateMappings --seqBias --gcBias --numBootstraps 30"
+  kmer: 31
+  libtype: "A"
+  # --numBootstraps is deliberately absent: bootstraps are only used by
+  # transcript-level uncertainty methods (Swish, sleuth). Standard DESeq2 on
+  # point estimates ignores them, and they multiply quantification time.
+  extra: "--validateMappings --seqBias"
 
 deseq2:
   design: "~ condition"
-  # Independent filtering: keep genes with >= min_count reads in >= min_samples
   min_count: 10
   min_samples: 3
   alpha: 0.05
-  lfc_shrink: "apeglm"   # apeglm | ashr | none
+  lfc_shrink: "apeglm"
   pca_group: "condition"
 
-# Each contrast is [factor, numerator, denominator] and is passed to
-# DESeq2::results(contrast = ...). Key becomes the output filename.
+enrichment:
+  # msigdbr species name, e.g. "Mus musculus" or "Homo sapiens"
+  species: "Mus musculus"
+  min_size: 15
+  max_size: 500
+
 contrasts:
-  treated_vs_control: ["condition", "treated", "control"]
+  cocaine_vs_saline: ["condition", "cocaine", "saline"]
