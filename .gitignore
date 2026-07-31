@@ -13,3 +13,4 @@ __pycache__/
 .RData
 .env
 *.attributes.json
+run.log
