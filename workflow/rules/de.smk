@@ -76,6 +76,7 @@ rule report_html:
         vst="results/deseq2/vst.rds",
         results="results/deseq2/{contrast}.results.tsv",
         gsea="results/enrichment/{contrast}.gsea.tsv",
+        gsea_plot="results/enrichment/{contrast}.gsea.png",
     output:
         report("results/report/{contrast}.report.html", category="Report"),
     log:
