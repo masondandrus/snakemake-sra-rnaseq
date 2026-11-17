@@ -41,6 +41,7 @@ def constrain(runs):
 wildcard_constraints:
     run=constrain(RUNS),
     read="1|2",
+    contrast="|".join(config["contrasts"]) if config.get("contrasts") else "^$",
 
 
 # ---------------------------------------------------------------------------
@@ -67,3 +68,42 @@ def all_fastqc_zips():
 
 def all_fastp_reports():
     return expand("results/qc/fastp/{run}.fastp.json", run=RUNS)
+
+
+# ---------------------------------------------------------------------------
+# Evidence axes for the convergence module (see rules/annotate.smk)
+# ---------------------------------------------------------------------------
+ANNOT = config.get("annotation", {})
+AXES = ANNOT.get("axes", []) if ANNOT.get("enabled") else []
+AXIS_BY_NAME = {a["name"]: a for a in AXES}
+INTERNAL_TYPES = {"deseq2", "wgcna"}
+
+
+def axes_of_type(*types):
+    return [a["name"] for a in AXES if a["type"] in types]
+
+
+def axis_constraint(names):
+    return "|".join(names) if names else "^$"
+
+
+def is_internal(name):
+    return AXIS_BY_NAME[name]["type"] in INTERNAL_TYPES
+
+
+def axis_path(name, contrast, suffix="tsv"):
+    """Contrast-specific axes live under results/; external resources are
+    cached once under resources/ and reused across contrasts."""
+    if is_internal(name):
+        return f"results/convergence/{contrast}.axis.{name}.{suffix}"
+    return f"resources/annotation/axis.{name}.{suffix}"
+
+
+def axis_inputs(w):
+    return [axis_path(a["name"], w.contrast) for a in AXES]
+
+
+def axis_provenance(w):
+    return [axis_path(a["name"], w.contrast, "provenance.json") for a in AXES]
+
+

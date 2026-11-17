@@ -36,3 +36,72 @@ enrichment:
 
 contrasts:
   cocaine_vs_saline: ["condition", "cocaine", "saline"]
+
+# ---------------------------------------------------------------------------
+# Multi-evidence convergence.
+#
+# Each entry in `axes` becomes one line of evidence. Types:
+#   deseq2  this workflow's DE result
+#   wgcna   hub genes from co-expression modules tracking the condition
+#   eqtl    region-matched cis-eQTL genes (gtex | ratgtex | file)
+#   gwas    genes mapped to trait-associated variants (GWAS Catalog)
+#   file    any gene list you supply
+#
+# An axis whose `species` differs from annotation.species is reached by
+# ortholog mapping, and every hit that needed one is flagged in the output.
+# ---------------------------------------------------------------------------
+annotation:
+  enabled: true
+  species: "Mus musculus"
+  orthologs: true
+  # Genes must hit these axes to appear at all. Empty = keep anything with
+  # at least one line of evidence.
+  require: ["DEG"]
+
+  axes:
+    - name: DEG
+      type: deseq2
+      alpha: 0.05
+
+    - name: HUB
+      type: wgcna
+
+    - name: eQTL
+      type: eqtl
+      source: gtex              # gtex | ratgtex | file
+      region: "Brain_Nucleus_accumbens_basal_ganglia"
+      species: "Homo sapiens"
+      qval: 0.05
+      # url: null               # bulk file, or override the API path
+      #
+      # For rat work use RatGTEx, whose regions match the addiction
+      # literature. Regions: NAcc IL PL OFC LHb pVTA RMTg BLA IC Brain
+      #   source: ratgtex
+      #   region: "NAcc"
+      #   species: "Rattus norvegicus"
+
+    - name: GWAS
+      type: gwas
+      species: "Homo sapiens"
+      traits:
+        - "EFO_0004329"         # cocaine dependence
+        - "EFO_0003890"         # substance abuse
+      pvalue: 5.0e-8
+
+    # Extend with anything expressible as a gene list. The file needs a
+    # gene_id and/or gene_symbol column; other columns carry through as
+    # metadata prefixed with the axis name.
+    #
+    # - name: ATAC
+    #   type: file
+    #   path: "resources/annotation/atac_differential_peaks.tsv"
+    #   species: "Mus musculus"
+
+  wgcna:
+    # WGCNA is unreliable below ~15 samples. Under this the rule writes an
+    # empty hub table and convergence reports the axis as unavailable.
+    min_samples: 15
+    n_top_genes: 5000
+    min_module_size: 30
+    kme_threshold: 0.8
+    power: "auto"
