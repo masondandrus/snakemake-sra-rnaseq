@@ -22,6 +22,8 @@ type    <- snakemake@params[["type"]]
 species <- snakemake@params[["species"]]
 opts    <- snakemake@params[["opts"]]
 
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
 cat("axis:", axis, " type:", type, " species:", species, "\n")
 
 prov <- list(
