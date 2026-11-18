@@ -4,7 +4,7 @@ channels:
 dependencies:
   - r-base =4.3
   - bioconductor-deseq2 =1.42
-  - r-wgcna =1.72
+  - r-wgcna >=1.72,<1.74
   - r-gprofiler2 =0.2
   - r-ggplot2 =3.5
   - r-ggrepel
