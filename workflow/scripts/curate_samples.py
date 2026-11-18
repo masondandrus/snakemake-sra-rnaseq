@@ -151,6 +151,27 @@ def call_model(attributes: dict, model: str) -> tuple[dict, dict]:
     return parsed, provenance
 
 
+def _strings(obj):
+    if isinstance(obj, dict):
+        for v in obj.values():
+            yield from _strings(v)
+    elif isinstance(obj, (list, tuple)):
+        for v in obj:
+            yield from _strings(v)
+    elif obj is not None:
+        yield str(obj)
+
+
+def _norm(text: str) -> str:
+    return " ".join(str(text).split())
+
+
+def quote_found(evidence: str, run_attributes) -> bool:
+    """True if the evidence quote occurs verbatim in one of the run's attribute values."""
+    quote = _norm(evidence).strip("\"'")
+    return bool(quote) and any(quote in _norm(v) for v in _strings(run_attributes))
+
+
 def validate(parsed: dict, attributes: dict) -> list[dict]:
     """Structural checks. The model is untrusted input, not an authority."""
     assignments = parsed.get("assignments")
@@ -172,6 +193,17 @@ def validate(parsed: dict, attributes: dict) -> list[dict]:
             sys.exit(f"Missing condition for {a.get('run')}.")
         if a["condition"] != "UNRESOLVED" and not a.get("evidence"):
             sys.exit(f"Assignment for {a['run']} has no supporting evidence quote.")
+
+    unverified = [
+        a["run"]
+        for a in assignments
+        if a["condition"] != "UNRESOLVED" and not quote_found(a["evidence"], attributes[a["run"]])
+    ]
+    if unverified:
+        sys.exit(
+            "Evidence quote not found in the run's own attributes for: "
+            f"{sorted(unverified)}"
+        )
 
     return assignments
 

@@ -161,7 +161,7 @@ Rank-based GSEA over the full gene list, ranked by
 the significance threshold, which matters when that list is short.
 
 ```{r gseaplot, fig.height=9}
-knitr::include_graphics(file.path(getwd(), snakemake@input[["gsea_plot"]]))
+knitr::include_graphics(file.path(getwd(), snakemake@input[["gsea_plot"]]), rel_path = FALSE)
 ```
 
 ```{r gseatable}

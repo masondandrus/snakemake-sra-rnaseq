@@ -13,6 +13,7 @@ include: "rules/download.smk"
 include: "rules/qc.smk"
 include: "rules/quant.smk"
 include: "rules/de.smk"
+include: "rules/annotate.smk"
 
 
 # ---------------------------------------------------------------------------
@@ -25,6 +26,10 @@ rule all:
         "results/deseq2/dds.rds",
         expand("results/deseq2/{contrast}.results.tsv", contrast=config["contrasts"]),
         expand("results/report/{contrast}.report.html", contrast=config["contrasts"]),
+        expand(
+            "results/convergence/{contrast}.convergence.tsv",
+            contrast=config["contrasts"] if config["annotation"]["enabled"] else [],
+        ),
 
 
 rule quant_only:
