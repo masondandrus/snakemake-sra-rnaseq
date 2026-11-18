@@ -84,8 +84,8 @@ annotation:
       type: gwas
       species: "Homo sapiens"
       traits:
-        - "EFO_0004329"         # cocaine dependence
-        - "EFO_0003890"         # substance abuse
+        - "MONDO_0005186"       # cocaine dependence
+        - "EFO_0010445"         # cocaine use disorder
       pvalue: 5.0e-8
 
     # Extend with anything expressible as a gene list. The file needs a
