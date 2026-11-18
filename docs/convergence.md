@@ -137,7 +137,7 @@ annotation:
     - name: GWAS
       type: gwas
       species: "Homo sapiens"
-      traits: ["EFO_0004329"]
+      traits: ["MONDO_0005186"]
   wgcna:
     min_samples: 15
 ```

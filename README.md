@@ -134,6 +134,52 @@ and GWAS naming the same gene is shared gene identity, not colocalisation.
 
 Details and configuration in [docs/convergence.md](docs/convergence.md).
 
+## Validation
+
+The full workflow was run from raw SRA downloads on GSE42805 ([Feng et al. 2014](https://pubmed.ncbi.nlm.nih.gov/24758366/);
+chronic cocaine vs. saline, mouse nucleus accumbens, 3 vs. 3, single-end) on two
+machines: a laptop in July 2026 and a clean desktop install in November 2026
+(commit `e8240f2`, Snakemake 9.27.1, WSL2 Ubuntu 26.04, 28 cores).
+
+| | Laptop, July 2026 | Clean desktop, November 2026 |
+|---|---|---|
+| Salmon mapping rate | 81–85% | 81.4–85.4% |
+| Genes retained after filtering | 24,297 | 24,295 |
+| Genes at padj < 0.05 | 27 | 26 |
+| Gene sets at padj < 0.05 (fgsea) | 18 | 14 |
+
+The differential expression result reproduces to within one gene. The fgsea
+count moves more because fgsea is permutation-based and `msigdbr` is not
+version-pinned.
+
+What this run does and does not show:
+
+- **It is a test that the workflow runs end to end and reproduces.** It is not a
+  re-analysis of the paper. The contrast is weak: the samples do not separate by
+  condition on PCA, and 26 genes pass the threshold.
+- **WGCNA did not run.** Six samples is below `annotation.wgcna.min_samples`
+  (15), so the rule wrote an empty hub table and the convergence table reports
+  three axes available, not four. The WGCNA rule has not yet produced modules on
+  a public dataset.
+- **The convergence table is uninformative here.** 8 of 26 DE genes have a
+  human-ortholog cis-eQTL in GTEx nucleus accumbens, but that eQTL list covers
+  12,026 genes, so 8 of 26 is about what chance gives. None of the 9 genes
+  mapped to genome-wide significant cocaine dependence or cocaine use disorder
+  associations in the GWAS Catalog is differentially expressed.
+- **The enrichment result is reported, not interpreted.** The significant GO:BP
+  sets are sensory and cardiac terms, which is not a credible nucleus accumbens
+  signal at this sample size.
+
+The clean install found five defects that the development machine had hidden: an
+`r-wgcna` version pin that no longer resolved, the retirement of GWAS Catalog
+REST API v1 (the fetch script now uses v2), two wrong EFO trait identifiers in
+the default config, a null-default operator missing in R 4.3, and a report rule
+that silently dropped the enrichment plot. All five are fixed in the commits
+leading to `e8240f2`.
+
+A larger study (15 or more samples, paired-end) is the next validation target,
+so that the WGCNA and convergence steps run on data that can support them.
+
 ## Repository layout
 
 ```
