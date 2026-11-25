@@ -30,13 +30,22 @@ USAGE
     python workflow/scripts/fetch_sra_metadata.py \
         --study SRP123456 --dump-attributes resources/SRP123456.attributes.json
 
-    # 2. propose assignments (writes proposal + provenance, changes nothing else)
+    # 2. propose assignments (one model call; writes proposal + provenance)
     python workflow/scripts/curate_samples.py \
         --attributes resources/SRP123456.attributes.json
 
-    # 3. read the proposal, then accept it
+    # 3. read resources/SRP123456.curation_proposal.tsv. To overrule a label,
+    #    edit its condition and set its confidence to "manual".
+
+    # 4. accept the saved proposal (no model call; writes a new sample sheet)
     python workflow/scripts/curate_samples.py \
-        --attributes resources/SRP123456.attributes.json --accept
+        --attributes resources/SRP123456.attributes.json \
+        --accept --out config/samples.curated.tsv
+
+Step 4 reads the proposal file from step 2. It never contacts the model, so
+the labels that enter the sample sheet are the labels that were reviewed. It
+stops if the attributes changed after the proposal, and it records whether
+the proposal file was edited by hand.
 
 Requires `pip install anthropic`.
 """
@@ -166,15 +175,56 @@ def _norm(text: str) -> str:
     return " ".join(str(text).split())
 
 
-def quote_found(evidence: str, run_attributes) -> bool:
-    """True if the evidence quote occurs verbatim in one of the run's attribute values."""
+def quote_found(evidence: str, value) -> bool:
+    """True if the evidence quote occurs verbatim in this attribute value."""
     quote = _norm(evidence).strip("\"'")
-    return bool(quote) and any(quote in _norm(v) for v in _strings(run_attributes))
+    return bool(quote) and any(quote in _norm(v) for v in _strings(value))
 
 
-def validate(parsed: dict, attributes: dict) -> list[dict]:
+def _resolved(a: dict) -> bool:
+    return a["condition"] != "UNRESOLVED" and a.get("confidence") != "manual"
+
+
+def unsupported_quotes(assignments: list[dict], attributes: dict) -> list[str]:
+    """Runs whose quote is not in the attribute that evidence_key names."""
+    bad = []
+    for a in assignments:
+        if not _resolved(a):
+            continue
+        key = a.get("evidence_key")
+        run_attrs = attributes[a["run"]]
+        if key not in run_attrs or not quote_found(a["evidence"], run_attrs[key]):
+            bad.append(a["run"])
+    return sorted(bad)
+
+
+def shared_quotes(assignments: list[dict], attributes: dict) -> list[str]:
+    """Quotes that also occur, under the same key, in a run of another condition.
+
+    Such a quote cannot be the reason for the label, because a run with a
+    different label carries the same text. Runs that a reviewer labelled by
+    hand are not used for the comparison.
+    """
+    clashes = []
+    for a in assignments:
+        if not _resolved(a):
+            continue
+        key = a.get("evidence_key")
+        for b in assignments:
+            if b["condition"] in (a["condition"], "UNRESOLVED"):
+                continue
+            if b.get("confidence") == "manual":
+                continue
+            other = attributes[b["run"]].get(key)
+            if other is not None and quote_found(a["evidence"], other):
+                clashes.append(f"{a['run']} ({a['condition']}) quotes text also in "
+                               f"{b['run']} ({b['condition']})")
+                break
+    return clashes
+
+
+def validate(assignments, attributes: dict) -> list[dict]:
     """Structural checks. The model is untrusted input, not an authority."""
-    assignments = parsed.get("assignments")
     if not isinstance(assignments, list) or not assignments:
         sys.exit("Response contained no assignments.")
 
@@ -182,27 +232,30 @@ def validate(parsed: dict, attributes: dict) -> list[dict]:
     returned = {a.get("run") for a in assignments}
 
     if returned - submitted:
-        sys.exit(f"Model invented runs not in the input: {sorted(returned - submitted)}")
+        sys.exit(f"Assignments name runs not in the input: {sorted(returned - submitted)}")
     if submitted - returned:
-        sys.exit(f"Model dropped runs: {sorted(submitted - returned)}")
+        sys.exit(f"Assignments are missing runs: {sorted(submitted - returned)}")
     if len(returned) != len(assignments):
-        sys.exit("Model returned duplicate run entries.")
+        sys.exit("Assignments contain duplicate run entries.")
 
     for a in assignments:
         if not a.get("condition"):
             sys.exit(f"Missing condition for {a.get('run')}.")
-        if a["condition"] != "UNRESOLVED" and not a.get("evidence"):
+        if _resolved(a) and not a.get("evidence"):
             sys.exit(f"Assignment for {a['run']} has no supporting evidence quote.")
 
-    unverified = [
-        a["run"]
-        for a in assignments
-        if a["condition"] != "UNRESOLVED" and not quote_found(a["evidence"], attributes[a["run"]])
-    ]
-    if unverified:
+    bad = unsupported_quotes(assignments, attributes)
+    if bad:
         sys.exit(
-            "Evidence quote not found in the run's own attributes for: "
-            f"{sorted(unverified)}"
+            "Evidence quote not found in the attribute named by evidence_key for: "
+            f"{bad}"
+        )
+
+    clashes = shared_quotes(assignments, attributes)
+    if clashes:
+        sys.exit(
+            "Evidence quote does not distinguish the label from another label:\n  "
+            + "\n  ".join(clashes)
         )
 
     return assignments
@@ -247,72 +300,121 @@ def report(parsed: dict, assignments: list[dict], attributes: dict) -> int:
     return needs_attention
 
 
-def write_outputs(
-    assignments: list[dict],
-    attributes: dict,
-    provenance: dict,
-    samples_path: pathlib.Path,
-    proposal_path: pathlib.Path,
-    provenance_path: pathlib.Path,
-    accept: bool,
-) -> None:
+def sha256_file(path: pathlib.Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def attributes_hash(attributes: dict) -> str:
+    return hashlib.sha256(json.dumps(attributes, indent=2, sort_keys=True).encode()).hexdigest()
+
+
+PROPOSAL_COLUMNS = ["run", "condition", "confidence", "evidence_key", "evidence"]
+
+
+def write_proposal(assignments, provenance, proposal_path, provenance_path) -> None:
     import pandas as pd
 
-    proposal = pd.DataFrame(assignments)[
-        ["run", "condition", "confidence", "evidence_key", "evidence"]
-    ]
-    proposal.to_csv(proposal_path, sep="\t", index=False)
+    pd.DataFrame(assignments).reindex(columns=PROPOSAL_COLUMNS).to_csv(
+        proposal_path, sep="\t", index=False
+    )
+    provenance["proposal_sha256"] = sha256_file(proposal_path)
     provenance_path.write_text(json.dumps(provenance, indent=2))
-
     print(f"\nProposal written to {proposal_path}")
     print(f"Provenance written to {provenance_path}")
+    print(
+        "\nNothing else was modified. Review the proposal, then run again with "
+        "--accept --out <new sample sheet>."
+    )
 
-    if not accept:
-        print(
-            "\nNothing else was modified. Review the proposal above, then re-run "
-            "with --accept to write these conditions into the sample sheet."
-        )
-        return
 
+def accept(attributes, proposal_path, provenance_path, acceptance_path,
+           samples_path, out_path, allow_unresolved, force) -> None:
+    """Write a sample sheet from the saved proposal. Makes no model call."""
+    import pandas as pd
+
+    for path in (proposal_path, provenance_path):
+        if not path.exists():
+            sys.exit(f"{path} does not exist. Run without --accept first.")
+    if out_path is None:
+        sys.exit("--accept needs --out, the path of the new sample sheet.")
+    if out_path.exists() and not force:
+        sys.exit(f"{out_path} exists. Choose another --out or pass --force.")
     if not samples_path.exists():
         sys.exit(f"{samples_path} does not exist. Build it first with fetch_sra_metadata.py.")
 
-    samples = pd.read_csv(samples_path, sep="\t", dtype=str)
-    mapping = dict(zip(proposal["run"], proposal["condition"]))
+    provenance = json.loads(provenance_path.read_text())
+    if provenance.get("input_sha256") != attributes_hash(attributes):
+        sys.exit(
+            "The attributes file changed after the proposal was made. "
+            "Run without --accept to make a new proposal."
+        )
 
-    missing = set(samples["run"]) - set(mapping)
+    proposal = pd.read_csv(proposal_path, sep="\t", dtype=str, keep_default_na=False)
+    missing = [c for c in PROPOSAL_COLUMNS if c not in proposal.columns]
     if missing:
-        sys.exit(f"Sample sheet contains runs absent from the proposal: {sorted(missing)}")
+        sys.exit(f"{proposal_path} is missing columns: {missing}")
+    assignments = validate(proposal.to_dict("records"), attributes)
+
+    n_unresolved = sum(a["condition"] == "UNRESOLVED" for a in assignments)
+    if n_unresolved and not allow_unresolved:
+        sys.exit(
+            f"{n_unresolved} run(s) are UNRESOLVED. Set their condition in "
+            f"{proposal_path} with confidence 'manual', or pass --allow-unresolved."
+        )
+
+    samples = pd.read_csv(samples_path, sep="\t", dtype=str)
+    mapping = {a["run"]: a["condition"] for a in assignments}
+    absent = set(samples["run"]) - set(mapping)
+    if absent:
+        sys.exit(f"Sample sheet contains runs absent from the proposal: {sorted(absent)}")
 
     old = samples["condition"].copy() if "condition" in samples else None
     samples["condition"] = samples["run"].map(mapping)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    samples.to_csv(out_path, sep="\t", index=False)
+
+    proposal_sha = sha256_file(proposal_path)
+    record = {
+        "accepted_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "proposal": str(proposal_path),
+        "proposal_sha256": proposal_sha,
+        "proposal_edited_after_model": proposal_sha != provenance.get("proposal_sha256"),
+        "attributes_sha256": provenance.get("input_sha256"),
+        "model": provenance.get("model"),
+        "n_runs": len(assignments),
+        "n_manual": sum(a.get("confidence") == "manual" for a in assignments),
+        "n_unresolved": n_unresolved,
+        "sample_sheet_in": str(samples_path),
+        "sample_sheet_out": str(out_path),
+        "sample_sheet_out_sha256": sha256_file(out_path),
+    }
+    acceptance_path.write_text(json.dumps(record, indent=2))
 
     if old is not None:
-        changed = (old != samples["condition"]).sum()
-        print(f"\nUpdated {changed} of {len(samples)} condition values.")
-
-    if (samples["condition"] == "UNRESOLVED").any():
-        n = int((samples["condition"] == "UNRESOLVED").sum())
-        print(
-            f"WARNING: {n} runs are UNRESOLVED. Fill these in by hand before "
-            "running the workflow — DESeq2 will happily model a nonsense factor level."
-        )
-
-    samples.to_csv(samples_path, sep="\t", index=False)
-    print(f"Wrote {samples_path}. Commit it alongside {provenance_path.name}.")
+        print(f"Changed {(old != samples['condition']).sum()} of {len(samples)} condition values.")
+    if record["proposal_edited_after_model"]:
+        print("The proposal file was edited after the model wrote it; the record says so.")
+    print(f"Wrote {out_path} and {acceptance_path}. {samples_path} was not modified.")
+    print(f"Commit {out_path.name}, {proposal_path.name}, {provenance_path.name} "
+          f"and {acceptance_path.name} together.")
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--attributes", required=True, help="JSON from --dump-attributes")
-    ap.add_argument("--samples", default="config/samples.tsv")
-    ap.add_argument("--model", default=DEFAULT_MODEL)
-    ap.add_argument(
-        "--accept",
-        action="store_true",
-        help="write the proposed conditions into the sample sheet",
+def main(argv=None) -> None:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    args = ap.parse_args()
+    ap.add_argument("--attributes", required=True, help="JSON from --dump-attributes")
+    ap.add_argument("--samples", default="config/samples.tsv",
+                    help="existing sample sheet; read, never modified")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--accept", action="store_true",
+                    help="write a sample sheet from the saved proposal; makes no model call")
+    ap.add_argument("--out", default=None, help="with --accept: path of the new sample sheet")
+    ap.add_argument("--allow-unresolved", action="store_true",
+                    help="with --accept: write the sheet even if runs are UNRESOLVED")
+    ap.add_argument("--force", action="store_true",
+                    help="with --accept: overwrite --out if it exists")
+    args = ap.parse_args(argv)
 
     attr_path = pathlib.Path(args.attributes)
     attributes = load_attributes(attr_path)
@@ -320,10 +422,17 @@ def main() -> None:
     stem = attr_path.name.replace(".attributes.json", "")
     proposal_path = attr_path.with_name(f"{stem}.curation_proposal.tsv")
     provenance_path = attr_path.with_name(f"{stem}.curation_provenance.json")
+    acceptance_path = attr_path.with_name(f"{stem}.curation_acceptance.json")
+
+    if args.accept:
+        accept(attributes, proposal_path, provenance_path, acceptance_path,
+               pathlib.Path(args.samples), pathlib.Path(args.out) if args.out else None,
+               args.allow_unresolved, args.force)
+        return
 
     print(f"Submitting {len(attributes)} runs to {args.model}...")
     parsed, provenance = call_model(attributes, args.model)
-    assignments = validate(parsed, attributes)
+    assignments = validate(parsed.get("assignments"), attributes)
     needs_attention = report(parsed, assignments, attributes)
 
     if needs_attention:
@@ -332,15 +441,7 @@ def main() -> None:
             "confidence. Check those against the SRA record before accepting."
         )
 
-    write_outputs(
-        assignments,
-        attributes,
-        provenance,
-        pathlib.Path(args.samples),
-        proposal_path,
-        provenance_path,
-        args.accept,
-    )
+    write_proposal(assignments, provenance, proposal_path, provenance_path)
 
 
 if __name__ == "__main__":

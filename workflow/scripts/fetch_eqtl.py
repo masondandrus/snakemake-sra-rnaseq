@@ -30,6 +30,8 @@ import json
 import pathlib
 import sys
 
+import pandas as pd
+
 # RatGTEx v3 (rn7). The "conditionally independent cis-eQTLs" table covers all
 # tissues in one file with a `tissue` column, which is cheaper than pulling
 # per-tissue files. Verified against https://ratgtex.org/download/v3/
@@ -60,6 +62,27 @@ RATGTEX_TISSUES = {
 }
 
 
+SOURCE_SPECIES = {"ratgtex": "Rattus norvegicus", "gtex": "Homo sapiens"}
+
+
+def resolve_species(source: str, declared: str | None) -> str:
+    """Species of the resource. GTEx and RatGTEx fix it; a file must declare it."""
+    fixed = SOURCE_SPECIES.get(source)
+    if fixed is None:
+        if not declared:
+            sys.exit(
+                "An eqtl axis with source: file needs a species on the axis entry, "
+                'for example species: "Rattus norvegicus".'
+            )
+        return declared
+    if declared and declared != fixed:
+        sys.exit(
+            f"The axis declares species '{declared}', but source '{source}' "
+            f"provides {fixed} eQTLs. Correct the axis entry."
+        )
+    return fixed
+
+
 def http_get(url: str) -> bytes:
     try:
         import requests
@@ -71,8 +94,6 @@ def http_get(url: str) -> bytes:
 
 
 def read_table(raw: bytes, url: str):
-    import pandas as pd
-
     buf = io.BytesIO(raw)
     if url.endswith(".gz"):
         buf = io.BytesIO(gzip.decompress(raw))
@@ -125,12 +146,11 @@ def from_ratgtex(region: str, qval: float, url: str | None):
     )
     # One row per gene: keep the strongest association.
     out = out.sort_values("eqtl_qval").drop_duplicates("gene_id", keep="first")
-    return out, src, "Rattus norvegicus"
+    return out, src
 
 
 def from_gtex_api(region: str, qval: float):
     """Page the GTEx v2 eGene endpoint for one tissue."""
-    import pandas as pd
     import requests
 
     rows, page, url = [], 0, GTEX_API + GTEX_EGENE_PATH
@@ -180,7 +200,7 @@ def from_gtex_api(region: str, qval: float):
         if pick(df, "variantId", "variant_id") else "",
     })
     out = out.sort_values("eqtl_qval").drop_duplicates("gene_id", keep="first")
-    return out, GTEX_API + GTEX_EGENE_PATH, "Homo sapiens"
+    return out, GTEX_API + GTEX_EGENE_PATH
 
 
 def from_gtex(region: str, qval: float, url: str | None):
@@ -202,12 +222,12 @@ def from_gtex(region: str, qval: float, url: str | None):
         }
     )
     out = out.sort_values("eqtl_qval").drop_duplicates("gene_id", keep="first")
-    return out, url, "Homo sapiens"
+    return out, url
 
 
 def from_file(path: str, qval: float):
-    import pandas as pd
-
+    if not path:
+        sys.exit("An eqtl axis with source: file needs a url entry holding the path of the table.")
     df = pd.read_csv(path, sep="\t")
     if "gene_id" not in df.columns:
         sys.exit(f"{path} must have a gene_id column. Found: {list(df.columns)}")
@@ -216,28 +236,30 @@ def from_file(path: str, qval: float):
     for c in ("eqtl_qval", "eqtl_variant"):
         if c not in df.columns:
             df[c] = "" if c.endswith("variant") else float("nan")
-    return df[["gene_id", "eqtl_qval", "eqtl_variant"]], path, "unknown"
+    return df[["gene_id", "eqtl_qval", "eqtl_variant"]], path
 
 
 def main() -> None:
-    import pandas as pd  # noqa: F401  (imported for side effects in helpers)
-
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--axis", default="eQTL", help="axis name used to prefix columns")
     ap.add_argument("--source", default="gtex", choices=["ratgtex", "gtex", "file"])
     ap.add_argument("--region", required=True, help="tissue/region code, e.g. NAcc")
     ap.add_argument("--qval", type=float, default=0.05)
     ap.add_argument("--url", default=None, help="override or local path for source: file")
+    ap.add_argument("--species", default=None,
+                    help="species declared on the axis entry; required for source: file")
     ap.add_argument("--out", required=True)
     ap.add_argument("--provenance", required=True)
     args = ap.parse_args()
 
+    species = resolve_species(args.source, args.species)
+
     if args.source == "ratgtex":
-        table, src, species = from_ratgtex(args.region, args.qval, args.url)
+        table, src = from_ratgtex(args.region, args.qval, args.url)
     elif args.source == "gtex":
-        table, src, species = from_gtex(args.region, args.qval, args.url)
+        table, src = from_gtex(args.region, args.qval, args.url)
     else:
-        table, src, species = from_file(args.url, args.qval)
+        table, src = from_file(args.url, args.qval)
 
     table = table.rename(columns={
         "eqtl_qval": f"{args.axis}_qval",

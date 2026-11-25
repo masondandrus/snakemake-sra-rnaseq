@@ -8,8 +8,8 @@ rule fastp_pe:
         r1="results/fastq/{run}_1.fastq.gz",
         r2="results/fastq/{run}_2.fastq.gz",
     output:
-        r1="results/trimmed/{run}_1.fastq.gz",
-        r2="results/trimmed/{run}_2.fastq.gz",
+        r1=temp("results/trimmed/{run}_1.fastq.gz"),
+        r2=temp("results/trimmed/{run}_2.fastq.gz"),
         json="results/qc/fastp/{run}.fastp.json",
         html="results/qc/fastp/{run}.fastp.html",
     log:
@@ -35,7 +35,7 @@ rule fastp_se:
     input:
         "results/fastq/{run}.fastq.gz",
     output:
-        fq="results/trimmed/{run}.fastq.gz",
+        fq=temp("results/trimmed/{run}.fastq.gz"),
         json="results/qc/fastp/{run}.fastp.json",
         html="results/qc/fastp/{run}.fastp.html",
     log:

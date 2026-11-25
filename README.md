@@ -70,14 +70,26 @@ python workflow/scripts/fetch_sra_metadata.py \
     --study SRP123456 --dump-attributes resources/SRP123456.attributes.json
 
 python workflow/scripts/curate_samples.py \
-    --attributes resources/SRP123456.attributes.json          # propose only
+    --attributes resources/SRP123456.attributes.json          # one model call; writes a proposal
 python workflow/scripts/curate_samples.py \
-    --attributes resources/SRP123456.attributes.json --accept # write sample sheet
+    --attributes resources/SRP123456.attributes.json \
+    --accept --out config/samples.curated.tsv                 # no model call; writes a new sheet
 ```
+
+`--accept` reads the saved proposal file. It never contacts the model, so the
+labels that reach the sample sheet are the labels that were reviewed. It stops
+if the attributes changed after the proposal, if any run is still `UNRESOLVED`,
+or if `--out` already exists, and it leaves the input sample sheet untouched.
+To overrule a label, edit its `condition` in the proposal and set its
+`confidence` to `manual`; the acceptance record notes that the proposal was
+edited.
 
 The model is treated as untrusted input, not an authority. Responses are
 rejected if they invent runs, drop runs, duplicate runs, or assign a condition
-without quoting the attribute text it came from. Anything the model cannot
+without quoting the attribute text it came from. The quote must sit in the
+attribute that the response names, and it must not also occur under that
+attribute in a run given a different label. These checks cannot catch two
+labels that are swapped, which is why a person reviews the proposal. Anything the model cannot
 support is returned as `UNRESOLVED` for you to resolve by hand rather than
 guessed. Runs below high confidence are flagged in the report. Candidate
 covariates — batch, sex, collection date — are surfaced as suggestions for
@@ -108,8 +120,10 @@ Cost is a few cents per study at current API rates.
 A DESeq2 result gives you a ranked list and nowhere obvious to start. The
 optional annotation module narrows it by asking which genes are named by more
 than one kind of evidence: differential expression, hub status in a
-condition-tracking co-expression module, a cis-eQTL in the matched tissue, and
-mapping to a GWAS variant for a relevant trait.
+co-expression module associated with the contrast, a cis-eQTL in the matched
+tissue, and mapping to a GWAS variant for a relevant trait. Module association
+is fitted on the module eigengenes with the DESeq2 design formula and the same
+numerator and denominator as the contrast, and corrected across modules.
 
 The axes are declared in config rather than hardcoded, and normalised to a
 common contract, so a fifth line of evidence — differential ATAC peaks, CUT&RUN
@@ -220,12 +234,22 @@ Rules declare `threads` and `mem_mb`. The salmon index build is the memory ceili
 
 ## Testing
 
-CI runs `snakemake --lint` and a full dry run against `.test/config.yaml` on every push, which catches wildcard, input-function, and DAG errors without downloading data. Run the same checks locally:
+CI runs `snakemake --lint`, a full dry run against `.test/config.yaml`, a static check of the Python scripts, and the Python unit tests on every push. Run the same checks locally:
 
 ```bash
 snakemake --lint
 snakemake -n --configfile .test/config.yaml
+python -m pytest tests/unit
 ```
+
+Two further layers need R with DESeq2, tximport and WGCNA, and CI does not run them yet:
+
+```bash
+Rscript tests/unit/run_r_tests.R .        # results table, enrichment ranking, module-trait model
+python -m pytest tests/integration        # salmon output to convergence table on synthetic data
+```
+
+The integration test simulates salmon output with known structure: one module driven by treatment, one driven by sex, one driven by neither, a gene with a p-value of zero, and a count outlier. It then checks that every modeled gene reaches the results table, and that the hub axis of each contrast holds genes from the module tied to that contrast and none from the others.
 
 ## Reference
 

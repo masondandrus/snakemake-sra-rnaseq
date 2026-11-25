@@ -1,5 +1,6 @@
-# Extract one contrast, apply LFC shrinkage, write a sorted results table
-# and an MA plot.
+# Extract one contrast, apply LFC shrinkage, and write the results table and
+# an MA plot. The table holds every modeled gene: genes without an adjusted
+# p-value stay in it, and padj_status says why the value is missing.
 
 log <- file(snakemake@log[[1]], open = "wt")
 sink(log, type = "output")
@@ -10,9 +11,10 @@ suppressPackageStartupMessages({
   library(ggplot2)
 })
 
+source(file.path(snakemake@scriptdir, "lib", "results_table.R"))
+
 dds <- readRDS(snakemake@input[["dds"]])
 t2g <- read.delim(snakemake@input[["tx2gene"]], stringsAsFactors = FALSE)
-# tx2gene is per-transcript; collapse to one symbol per gene
 sym <- t2g[!duplicated(t2g$gene_id), c("gene_id", "gene_symbol")]
 contrast <- unlist(snakemake@params[["contrast"]])
 alpha <- as.numeric(snakemake@params[["alpha"]])
@@ -21,7 +23,8 @@ shrink <- snakemake@params[["shrink"]]
 stopifnot(length(contrast) == 3)
 cat("contrast:", paste(contrast, collapse = " / "), "\n")
 
-res <- results(dds, contrast = contrast, alpha = alpha)
+wald <- results(dds, contrast = contrast, alpha = alpha)
+final <- wald
 
 if (shrink != "none") {
   # apeglm needs a coefficient name, so relevel to the denominator first.
@@ -31,28 +34,28 @@ if (shrink != "none") {
     dds <- nbinomWaldTest(dds, quiet = TRUE)
     coef_name <- paste0(factor_name, "_", contrast[2], "_vs_", contrast[3])
     if (coef_name %in% resultsNames(dds)) {
-      res <- lfcShrink(dds, coef = coef_name, type = "apeglm", res = res)
+      final <- lfcShrink(dds, coef = coef_name, type = "apeglm", res = wald)
     } else {
       cat("apeglm coefficient not found; falling back to ashr\n")
-      res <- lfcShrink(dds, contrast = contrast, type = "ashr", res = res)
+      final <- lfcShrink(dds, contrast = contrast, type = "ashr", res = wald)
+      shrink <- "ashr (fallback from apeglm)"
     }
   } else {
-    res <- lfcShrink(dds, contrast = contrast, type = shrink, res = res)
+    final <- lfcShrink(dds, contrast = contrast, type = shrink, res = wald)
   }
 }
+cat("shrinkage:", shrink, "\n")
 
-df <- as.data.frame(res)
-df$gene_id <- rownames(df)
-df <- merge(df, sym, by = "gene_id", all.x = TRUE)
-df$gene_symbol[is.na(df$gene_symbol)] <- ""
-df <- df[order(df$padj, na.last = NA), ]
-df <- df[, c("gene_id", "gene_symbol", setdiff(names(df), c("gene_id", "gene_symbol")))]
+df <- assemble_results(wald, final, sym)
+stopifnot(nrow(df) == nrow(dds))
 write.table(df, snakemake@output[["tsv"]], sep = "\t", quote = FALSE, row.names = FALSE)
 
+cat("genes in the model:", nrow(df), "\n")
+print(table(padj_status = df$padj_status))
 cat("significant at padj <", alpha, ":", sum(df$padj < alpha, na.rm = TRUE), "\n")
 
 png(snakemake@output[["ma"]], width = 1400, height = 1000, res = 200)
-plotMA(res, alpha = alpha, main = paste(contrast[2], "vs", contrast[3]))
+plotMA(final, alpha = alpha, main = paste(contrast[2], "vs", contrast[3]))
 dev.off()
 
 sessionInfo()

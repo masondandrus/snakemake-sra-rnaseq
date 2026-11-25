@@ -18,7 +18,7 @@ rule deseq2_init:
         pca_group=config["deseq2"]["pca_group"],
     conda:
         "../envs/deseq2.yaml"
-    threads: 4
+    threads: 1
     resources:
         mem_mb=16000,
     script:
@@ -40,7 +40,7 @@ rule deseq2_results:
         shrink=config["deseq2"]["lfc_shrink"],
     conda:
         "../envs/deseq2.yaml"
-    threads: 4
+    threads: 1
     resources:
         mem_mb=16000,
     script:
@@ -48,19 +48,19 @@ rule deseq2_results:
 
 
 rule fgsea:
-    """Rank-based enrichment. Uses the whole gene list, not just the
-    significant subset, which is what makes it usable on small designs."""
+    """Rank-based enrichment on every modeled gene with a Wald statistic."""
     input:
         results="results/deseq2/{contrast}.results.tsv",
     output:
         tsv="results/enrichment/{contrast}.gsea.tsv",
+        ranks="results/enrichment/{contrast}.ranks.tsv",
         plot=report("results/enrichment/{contrast}.gsea.png", category="Enrichment"),
     log:
         "logs/fgsea/{contrast}.log",
     params:
-        species=config["enrichment"]["species"],
-        min_size=config["enrichment"]["min_size"],
-        max_size=config["enrichment"]["max_size"],
+        species=ENRICH["species"],
+        min_size=ENRICH.get("min_size", 15),
+        max_size=ENRICH.get("max_size", 500),
     conda:
         "../envs/report.yaml"
     threads: 4

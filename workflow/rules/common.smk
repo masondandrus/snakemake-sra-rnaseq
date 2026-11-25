@@ -1,5 +1,7 @@
 """Sample-sheet parsing, wildcard constraints, and input helper functions."""
 
+import shlex
+
 import pandas as pd
 
 
@@ -73,8 +75,15 @@ def all_fastp_reports():
 # ---------------------------------------------------------------------------
 # Evidence axes for the convergence module (see rules/annotate.smk)
 # ---------------------------------------------------------------------------
-ANNOT = config.get("annotation", {})
+ANNOT = config.get("annotation") or {}
+ENRICH = config.get("enrichment") or {}
+if "species" not in ENRICH:
+    raise ValueError(
+        "enrichment.species is required in the configuration, "
+        'for example "Mus musculus" or "Homo sapiens"'
+    )
 AXES = ANNOT.get("axes", []) if ANNOT.get("enabled") else []
+WGCNA_OPTS = ANNOT.get("wgcna") or {}
 AXIS_BY_NAME = {a["name"]: a for a in AXES}
 INTERNAL_TYPES = {"deseq2", "wgcna"}
 
@@ -89,6 +98,57 @@ def axis_constraint(names):
 
 def is_internal(name):
     return AXIS_BY_NAME[name]["type"] in INTERNAL_TYPES
+
+
+SPECIES_CODE = {
+    "Homo sapiens": "hsapiens",
+    "Mus musculus": "mmusculus",
+    "Rattus norvegicus": "rnorvegicus",
+}
+EQTL_SOURCE_SPECIES = {"gtex": "Homo sapiens", "ratgtex": "Rattus norvegicus"}
+
+
+def axis_species(axis):
+    """Species of an axis's identifiers, as the axis scripts resolve it."""
+    if axis["type"] == "gwas":
+        return "Homo sapiens"
+    if axis["type"] == "eqtl":
+        return EQTL_SOURCE_SPECIES.get(axis.get("source", "gtex")) or axis.get("species")
+    return axis.get("species") or ANNOT.get("species")
+
+
+def ortholog_targets():
+    """Species other than the expression species that some axis needs."""
+    if not ANNOT.get("orthologs", True):
+        return []
+    targets = sorted(
+        {axis_species(a) for a in AXES} - {ANNOT.get("species"), None}
+    )
+    unknown = [s for s in targets + [ANNOT.get("species")] if targets and s not in SPECIES_CODE]
+    if unknown:
+        raise ValueError(
+            f"No ortholog mapping is defined for: {unknown}. "
+            f"Supported species: {sorted(SPECIES_CODE)}"
+        )
+    return targets
+
+
+def ortholog_path(species, suffix="tsv"):
+    src, dst = SPECIES_CODE[ANNOT["species"]], SPECIES_CODE[species]
+    return f"resources/annotation/orthologs.{src}_to_{dst}.{suffix}"
+
+
+def reference_axis():
+    """Axis the overlap tests compare against."""
+    if ANNOT.get("overlap_reference"):
+        return ANNOT["overlap_reference"]
+    deseq2_axes = axes_of_type("deseq2")
+    return deseq2_axes[0] if deseq2_axes else None
+
+
+def cli_opt(flag, value):
+    """'--flag value' for a set value, an empty string otherwise."""
+    return f"{flag} {shlex.quote(str(value))}" if value else ""
 
 
 def axis_path(name, contrast, suffix="tsv"):
