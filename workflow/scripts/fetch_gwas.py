@@ -28,6 +28,7 @@ import sys
 import time
 
 BASE = "https://www.ebi.ac.uk/gwas/rest/api/v2"
+CATALOG_SPECIES = "Homo sapiens"
 ONTOLOGY_PREFIXES = ("EFO_", "MONDO_", "ORPHANET_", "HP_", "OBA_", "GO_", "CHEBI_")
 
 
@@ -129,9 +130,16 @@ def main() -> None:
     ap.add_argument("--child-traits", action="store_true",
                     help="also include associations for more specific child traits")
     ap.add_argument("--page-size", type=int, default=100)
+    ap.add_argument("--species", default=None, help="species declared on the axis entry")
     ap.add_argument("--out", required=True)
     ap.add_argument("--provenance", required=True)
     args = ap.parse_args()
+
+    if args.species and args.species != CATALOG_SPECIES:
+        sys.exit(
+            f"The axis declares species '{args.species}', but the GWAS Catalog "
+            f"holds {CATALOG_SPECIES} associations. Correct the axis entry."
+        )
 
     all_rows, resolved, missing = [], [], []
     for term in args.traits:
@@ -178,7 +186,7 @@ def main() -> None:
     prov = {
         "name": args.axis,
         "type": "gwas",
-        "species": "Homo sapiens",
+        "species": CATALOG_SPECIES,
         "key": "gene_symbol",
         "skipped": False,
         "retrieved_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),

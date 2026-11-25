@@ -2,12 +2,12 @@
 #
 # Why GSEA rather than overrepresentation of the significant list: with a small
 # design the padj < 0.05 set is often too short for ORA to say anything, while
-# the ranked statistic still carries coordinated signal across a pathway. GSEA
-# uses every gene, so it does not throw away everything below the threshold.
+# the ranked statistic still carries coordinated signal across a pathway.
 #
-# Ranking metric is sign(log2FC) * -log10(pvalue). The Wald statistic would be
-# the more usual choice, but lfcShrink drops it from the results object, and
-# this preserves both direction and evidence strength.
+# The ranking metric is the Wald statistic from the unshrunken test. Every
+# modeled gene with a statistic and a symbol is ranked, whether or not it has
+# an adjusted p-value. lib/ranking.R counts the genes left out, by reason, and
+# the ranked list is written next to the result.
 
 log <- file(snakemake@log[[1]], open = "wt")
 sink(log, type = "output")
@@ -28,23 +28,13 @@ species <- snakemake@params[["species"]]
 min_size <- as.integer(snakemake@params[["min_size"]])
 max_size <- as.integer(snakemake@params[["max_size"]])
 
-# ---------------------------------------------------------------------------
-# Ranked vector, keyed on gene symbol (MSigDB sets are symbol-based)
-# ---------------------------------------------------------------------------
-if (!"gene_symbol" %in% names(res)) {
-  stop("results table has no gene_symbol column; deseq2_results.R must annotate it")
-}
+source(file.path(snakemake@scriptdir, "lib", "ranking.R"))
 
-ranked <- res %>%
-  filter(!is.na(pvalue), !is.na(log2FoldChange), gene_symbol != "") %>%
-  mutate(metric = sign(log2FoldChange) * -log10(pvalue)) %>%
-  filter(is.finite(metric)) %>%
-  group_by(gene_symbol) %>%
-  summarise(metric = metric[which.max(abs(metric))], .groups = "drop") %>%
-  arrange(desc(metric))
-
-stats <- setNames(ranked$metric, ranked$gene_symbol)
-cat("ranked genes:", length(stats), "\n")
+ranked <- rank_genes(res)
+cat("ranking:\n")
+print(ranked$excluded)
+write_tsv(ranked$ranks, snakemake@output[["ranks"]])
+stats <- setNames(ranked$ranks$stat, ranked$ranks$gene_symbol)
 
 # ---------------------------------------------------------------------------
 # Gene sets. msigdbr changed its argument names between versions, so try the
@@ -66,8 +56,7 @@ get_sets <- function(coll, subcoll = NULL) {
       msigdbr(species = species, category = coll, subcategory = subcoll)
     }
   }
-  sym <- if ("gene_symbol" %in% names(out)) "gene_symbol" else "gene_symbol"
-  split(out[[sym]], out$gs_name)
+  split(out$gene_symbol, out$gs_name)
 }
 
 collections <- list(
@@ -83,7 +72,8 @@ run_one <- function(pathways, label) {
     stats = stats,
     minSize = min_size,
     maxSize = max_size,
-    eps = 0
+    eps = 0,
+    nproc = as.integer(snakemake@threads)
   )
   fg <- fg[order(fg$padj, -abs(fg$NES)), ]
   fg$collection <- label

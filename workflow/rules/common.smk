@@ -1,5 +1,7 @@
 """Sample-sheet parsing, wildcard constraints, and input helper functions."""
 
+import shlex
+
 import pandas as pd
 
 
@@ -73,8 +75,15 @@ def all_fastp_reports():
 # ---------------------------------------------------------------------------
 # Evidence axes for the convergence module (see rules/annotate.smk)
 # ---------------------------------------------------------------------------
-ANNOT = config.get("annotation", {})
+ANNOT = config.get("annotation") or {}
+ENRICH = config.get("enrichment") or {}
+if "species" not in ENRICH:
+    raise ValueError(
+        "enrichment.species is required in the configuration, "
+        'for example "Mus musculus" or "Homo sapiens"'
+    )
 AXES = ANNOT.get("axes", []) if ANNOT.get("enabled") else []
+WGCNA_OPTS = ANNOT.get("wgcna") or {}
 AXIS_BY_NAME = {a["name"]: a for a in AXES}
 INTERNAL_TYPES = {"deseq2", "wgcna"}
 
@@ -89,6 +98,11 @@ def axis_constraint(names):
 
 def is_internal(name):
     return AXIS_BY_NAME[name]["type"] in INTERNAL_TYPES
+
+
+def cli_opt(flag, value):
+    """'--flag value' for a set value, an empty string otherwise."""
+    return f"{flag} {shlex.quote(str(value))}" if value else ""
 
 
 def axis_path(name, contrast, suffix="tsv"):

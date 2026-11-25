@@ -42,7 +42,7 @@ contrasts:
 #
 # Each entry in `axes` becomes one line of evidence. Types:
 #   deseq2  this workflow's DE result
-#   wgcna   hub genes from co-expression modules tracking the condition
+#   wgcna   hub genes of co-expression modules associated with the contrast
 #   eqtl    region-matched cis-eQTL genes (gtex | ratgtex | file)
 #   gwas    genes mapped to trait-associated variants (GWAS Catalog)
 #   file    any gene list you supply
@@ -98,10 +98,16 @@ annotation:
     #   species: "Mus musculus"
 
   wgcna:
-    # WGCNA is unreliable below ~15 samples. Under this the rule writes an
-    # empty hub table and convergence reports the axis as unavailable.
+    # WGCNA is unreliable below ~15 samples. Under this the rule writes empty
+    # tables and convergence reports the axis as unavailable.
     min_samples: 15
     n_top_genes: 5000
     min_module_size: 30
-    kme_threshold: 0.8
+    # "auto" takes the lowest power whose scale-free fit reaches scale_free_r2.
     power: "auto"
+    scale_free_r2: 0.8
+    # A gene is a hub if its module is associated with the contrast at
+    # module_alpha (Benjamini-Hochberg across modules) and its kME reaches
+    # kme_threshold.
+    module_alpha: 0.05
+    kme_threshold: 0.8

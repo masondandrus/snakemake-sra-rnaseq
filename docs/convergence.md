@@ -11,7 +11,7 @@ The axes are declared in config, not hardcoded. Five types ship:
 | Type | Source | Question |
 | --- | --- | --- |
 | `deseq2` | this workflow's DE result | Does expression change with condition? |
-| `wgcna` | co-expression on the same counts | Is it a hub of a module that tracks the condition? |
+| `wgcna` | co-expression on the same counts | Is it a hub of a module associated with this contrast? |
 | `eqtl` | GTEx or RatGTEx, region-matched | Is its expression under genetic control in this tissue? |
 | `gwas` | NHGRI-EBI GWAS Catalog | Is it mapped to a variant associated with the trait? |
 | `file` | anything you supply | Whatever you can express as a gene list |
@@ -63,12 +63,26 @@ the remaining axes and reports how many were available.
 This is deliberate. Modules estimated from six samples look exactly as
 plausible as real ones and reproduce nothing.
 
+The network is built once from all samples. For each contrast, every module
+eigengene is then regressed on the DESeq2 design formula, and the coefficient
+for the contrast's numerator against its denominator is tested. P-values are
+corrected across modules (Benjamini-Hochberg). A gene enters the hub axis if
+its module passes `annotation.wgcna.module_alpha` and its kME reaches
+`annotation.wgcna.kme_threshold`. `results/wgcna/{contrast}.{axis}.module_trait.tsv`
+holds the estimate, p-value and adjusted p-value of every module.
+
+The soft-threshold power is the lowest power whose scale-free fit reaches
+`annotation.wgcna.scale_free_r2`. `results/wgcna/soft_threshold.tsv` holds the
+fit at every power tried. When no power passes, the rule takes the value that
+the WGCNA FAQ gives for a signed network at that number of samples, and the
+provenance file says so.
+
 ## Species and orthologs
 
 The DE data and the annotation resources are usually different species: mouse
 or rat expression, rat eQTLs, human GWAS. `g:Orth` maps DE gene IDs into each
 resource's species, and every hit that depended on a mapping is flagged in the
-output (`eqtl_via_ortholog`, `gwas_via_ortholog`, `any_ortholog`), because
+output (`{axis}_via_ortholog` for each axis, and `any_ortholog`), because
 ortholog assignment is lossy in both directions and a reviewer should be able
 to see which calls rest on it.
 
@@ -95,7 +109,7 @@ conclusion.
 
 ## Regions
 
-`annotation.region` selects the eQTL tissue. RatGTEx covers the regions the
+The `region` key of each eQTL axis selects the tissue. RatGTEx covers the regions the
 addiction literature actually uses:
 
 `NAcc` nucleus accumbens core · `IL` infralimbic cortex · `PL` prelimbic cortex

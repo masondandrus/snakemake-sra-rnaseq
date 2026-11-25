@@ -29,7 +29,12 @@ cat("genes after filtering:", nrow(dds), "\n")
 dds <- DESeq(dds)
 saveRDS(dds, snakemake@output[["dds"]])
 
-vsd <- vst(dds, blind = TRUE)
+# vst() subsamples 1,000 genes and stops below that number.
+vsd <- if (nrow(dds) >= 1000) {
+  vst(dds, blind = TRUE)
+} else {
+  varianceStabilizingTransformation(dds, blind = TRUE)
+}
 saveRDS(vsd, snakemake@output[["vst"]])
 
 group <- snakemake@params[["pca_group"]]

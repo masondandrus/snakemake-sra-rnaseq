@@ -17,11 +17,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Snakemake
-        run: pip install "snakemake>=7.32,<9" pandas
+      - name: Install Snakemake and test tools
+        run: pip install "snakemake>=7.32,<9" pandas pyyaml pytest pyflakes
 
       - name: Compile-check helper scripts
         run: python -m py_compile workflow/scripts/*.py
+
+      - name: Static check (tx2gene.py runs only under Snakemake)
+        run: python -m pyflakes $(ls workflow/scripts/*.py | grep -v tx2gene.py)
+
+      - name: Python unit tests
+        run: python -m pytest tests/unit -q
 
       - name: Lint
         run: snakemake --lint --configfile .test/config.yaml

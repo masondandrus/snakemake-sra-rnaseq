@@ -38,6 +38,7 @@ Contrast: **`r label`** (factor `r contrast[1]`), tested at padj < `r alpha`.
 - Samples: **`r ncol(dds)`** (`r paste(table(colData(dds)[[contrast[1]]]), names(table(colData(dds)[[contrast[1]]])), collapse = ", ")`)
 - Genes retained after filtering: **`r nrow(dds)`**
 - Genes at padj < `r alpha`: **`r n_sig`**
+- Genes without an adjusted p-value: **`r sum(is.na(res$padj))`** (`r paste(names(table(res$padj_status[is.na(res$padj)])), table(res$padj_status[is.na(res$padj)]), collapse = ", ")`)
 - Median library size: **`r format(round(median(colSums(counts(dds)))), big.mark = ",")`** assigned counts
 
 ```{r caveat, results='asis'}
@@ -156,9 +157,9 @@ whose apparent effect comes from a single sample are visible immediately here.
 
 ## Gene set enrichment
 
-Rank-based GSEA over the full gene list, ranked by
-`sign(log2FC) * -log10(p)`. This uses every gene rather than only those passing
-the significance threshold, which matters when that list is short.
+Rank-based GSEA over every modeled gene that has a Wald statistic and a gene
+symbol, ranked by that statistic. The ranking includes genes without an
+adjusted p-value.
 
 ```{r gseaplot, fig.height=9}
 knitr::include_graphics(file.path(getwd(), snakemake@input[["gsea_plot"]]), rel_path = FALSE)

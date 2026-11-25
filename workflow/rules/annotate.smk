@@ -40,12 +40,17 @@ rule axis_deseq2:
 
 
 rule axis_wgcna:
+    """Hub genes of the modules associated with this contrast. The association
+    is fitted with the DESeq2 design formula and corrected across modules."""
     input:
-        src="results/wgcna/hubs.tsv",
+        src="results/wgcna/modules.tsv",
+        eigengenes="results/wgcna/eigengenes.tsv",
         src_provenance="results/wgcna/provenance.json",
+        dds="results/deseq2/dds.rds",
     output:
         tsv="results/convergence/{contrast}.axis.{axis}.tsv",
         provenance="results/convergence/{contrast}.axis.{axis}.provenance.json",
+        module_trait="results/wgcna/{contrast}.{axis}.module_trait.tsv",
     log:
         "logs/annotation/{contrast}.axis.{axis}.log",
     wildcard_constraints:
@@ -55,6 +60,10 @@ rule axis_wgcna:
         type="wgcna",
         species=lambda w: AXIS_BY_NAME[w.axis].get("species") or ANNOT["species"],
         opts=lambda w: AXIS_BY_NAME[w.axis],
+        contrast=lambda w: config["contrasts"][w.contrast],
+        design=config["deseq2"]["design"],
+        kme_threshold=WGCNA_OPTS.get("kme_threshold", 0.8),
+        module_alpha=WGCNA_OPTS.get("module_alpha", 0.05),
     conda:
         "../envs/annotate.yaml"
     script:
@@ -62,25 +71,24 @@ rule axis_wgcna:
 
 
 rule wgcna:
-    """Co-expression modules and hub genes. Refuses below wgcna.min_samples and
-    writes an empty hub table rather than a fabricated one."""
+    """Co-expression modules, eigengenes and kME, built once from all samples.
+    Below wgcna.min_samples the rule writes empty tables and records why."""
     input:
         vst="results/deseq2/vst.rds",
-        dds="results/deseq2/dds.rds",
     output:
         modules="results/wgcna/modules.tsv",
-        hubs="results/wgcna/hubs.tsv",
+        eigengenes="results/wgcna/eigengenes.tsv",
+        soft_threshold="results/wgcna/soft_threshold.tsv",
         plot=report("results/wgcna/modules.png", category="Co-expression"),
         provenance="results/wgcna/provenance.json",
     log:
         "logs/annotation/wgcna.log",
     params:
-        min_samples=ANNOT.get("wgcna", {}).get("min_samples", 15),
-        n_top_genes=ANNOT.get("wgcna", {}).get("n_top_genes", 5000),
-        min_module_size=ANNOT.get("wgcna", {}).get("min_module_size", 30),
-        kme_threshold=ANNOT.get("wgcna", {}).get("kme_threshold", 0.8),
-        power=ANNOT.get("wgcna", {}).get("power", "auto"),
-        trait=config["deseq2"]["pca_group"],
+        min_samples=WGCNA_OPTS.get("min_samples", 15),
+        n_top_genes=WGCNA_OPTS.get("n_top_genes", 5000),
+        min_module_size=WGCNA_OPTS.get("min_module_size", 30),
+        scale_free_r2=WGCNA_OPTS.get("scale_free_r2", 0.8),
+        power=WGCNA_OPTS.get("power", "auto"),
     conda:
         "../envs/annotate.yaml"
     threads: 8
@@ -105,20 +113,19 @@ rule axis_eqtl:
     wildcard_constraints:
         axis=axis_constraint(axes_of_type("eqtl")),
     params:
+        script=workflow.source_path("../scripts/fetch_eqtl.py"),
         source=lambda w: AXIS_BY_NAME[w.axis].get("source", "gtex"),
         region=lambda w: AXIS_BY_NAME[w.axis]["region"],
         qval=lambda w: AXIS_BY_NAME[w.axis].get("qval", 0.05),
-        url=lambda w: (
-            "--url {}".format(AXIS_BY_NAME[w.axis]["url"])
-            if AXIS_BY_NAME[w.axis].get("url") else ""
-        ),
+        url=lambda w: cli_opt("--url", AXIS_BY_NAME[w.axis].get("url")),
+        species=lambda w: cli_opt("--species", AXIS_BY_NAME[w.axis].get("species")),
     conda:
         "../envs/annotate.yaml"
     retries: 2
     shell:
-        "python workflow/scripts/fetch_eqtl.py "
+        "python {params.script:q} "
         "--axis {wildcards.axis} --source {params.source} "
-        "--region {params.region:q} --qval {params.qval} {params.url} "
+        "--region {params.region:q} --qval {params.qval} {params.url} {params.species} "
         "--out {output.tsv} --provenance {output.provenance} > {log} 2>&1"
 
 
@@ -133,15 +140,17 @@ rule axis_gwas:
     wildcard_constraints:
         axis=axis_constraint(axes_of_type("gwas")),
     params:
+        script=workflow.source_path("../scripts/fetch_gwas.py"),
         traits=lambda w: AXIS_BY_NAME[w.axis]["traits"],
         pvalue=lambda w: AXIS_BY_NAME[w.axis].get("pvalue", 5e-8),
+        species=lambda w: cli_opt("--species", AXIS_BY_NAME[w.axis].get("species")),
     conda:
         "../envs/annotate.yaml"
     retries: 2
     shell:
-        "python workflow/scripts/fetch_gwas.py "
+        "python {params.script:q} "
         "--axis {wildcards.axis} --traits {params.traits:q} "
-        "--pvalue {params.pvalue} "
+        "--pvalue {params.pvalue} {params.species} "
         "--out {output.tsv} --provenance {output.provenance} > {log} 2>&1"
 
 
@@ -156,12 +165,13 @@ rule axis_file:
     wildcard_constraints:
         axis=axis_constraint(axes_of_type("file")),
     params:
+        script=workflow.source_path("../scripts/axis_from_file.py"),
         path=lambda w: AXIS_BY_NAME[w.axis]["path"],
         species=lambda w: AXIS_BY_NAME[w.axis].get("species") or ANNOT["species"],
     conda:
         "../envs/annotate.yaml"
     shell:
-        "python workflow/scripts/axis_from_file.py "
+        "python {params.script:q} "
         "--axis {wildcards.axis} --path {params.path:q} "
         "--species {params.species:q} "
         "--out {output.tsv} --provenance {output.provenance} > {log} 2>&1"
