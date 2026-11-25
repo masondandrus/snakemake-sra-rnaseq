@@ -86,8 +86,40 @@ output (`{axis}_via_ortholog` for each axis, and `any_ortholog`), because
 ortholog assignment is lossy in both directions and a reviewer should be able
 to see which calls rest on it.
 
-Set `annotation.orthologs: false` to require exact ID matching instead, which
-is right when the data and the resource are the same species.
+The rule `orthologs` fetches one table per pair of species and keeps it under
+`resources/annotation/` with the g:Profiler version and the retrieval date. The
+convergence step reads that file and makes no network request. If the request
+fails, the job fails and the run stops. A gene with several orthologs is
+positive on an axis when any of them is on the axis, and the provenance file
+counts such genes.
+
+With `annotation.orthologs: false`, no table is fetched, and every gene is
+`not_evaluable` on an axis of another species.
+
+## Gene states and the overlap test
+
+For every gene in the results table and every axis, the convergence step
+records one of four states in the column `{axis}_state`:
+
+| State | Meaning |
+|---|---|
+| `positive` | The axis could have named the gene, and it did. |
+| `negative` | The axis could have named the gene, and it did not. |
+| `not_evaluable` | The axis could not have named the gene: it has no ortholog in the axis's species, or it lies outside the axis's background. |
+| `axis_skipped` | The whole axis was skipped, for example WGCNA below its minimum sample count. |
+
+The background of the `deseq2` axis is every gene with an adjusted p-value.
+The background of the `wgcna` axis is every gene that entered the network. An
+external axis has no background of its own yet, so every gene with an
+identifier in the axis's species counts as evaluable.
+
+`{contrast}.overlap.tsv` tests each usable axis against the reference axis
+(`annotation.overlap_reference`, by default the first `deseq2` axis). The test
+is a one-sided Fisher's exact test over the genes evaluable on both axes, with
+Benjamini-Hochberg correction across axes. The table gives the universe size,
+both set sizes, the observed and expected overlap, and the odds ratio. The test
+ignores expression level and gene length, which also influence whether a gene
+is differentially expressed or has a known eQTL.
 
 ## Adding an axis
 
