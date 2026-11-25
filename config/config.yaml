@@ -57,6 +57,10 @@ annotation:
   # Genes must hit these axes to appear at all. Empty = keep anything with
   # at least one line of evidence.
   require: ["DEG"]
+  # Axis that every other axis is tested against for overlap (one-sided
+  # Fisher's exact test over genes evaluable on both). Defaults to the first
+  # deseq2 axis.
+  overlap_reference: "DEG"
 
   axes:
     - name: DEG

@@ -37,9 +37,10 @@ if (type == "deseq2") {
     transmute(gene_id, gene_symbol,
               !!paste0(axis, "_padj") := padj,
               !!paste0(axis, "_log2fc") := log2FoldChange)
+  background <- res %>% filter(!is.na(padj)) %>% select(gene_id)
   prov$alpha <- alpha
   prov$skipped <- FALSE
-  prov$n_eligible <- sum(!is.na(res$padj))
+  prov$n_eligible <- nrow(background)
   cat("DE genes at padj <", alpha, ":", nrow(tab), "\n")
 
 } else if (type == "wgcna") {
@@ -56,6 +57,7 @@ if (type == "deseq2") {
 
   if (isTRUE(wp$skipped)) {
     tab <- tibble::tibble(gene_id = character())
+    background <- tibble::tibble(gene_id = character())
     trait <- empty_trait
     prov$skipped <- TRUE
     prov$skip_reason <- wp$reason
@@ -67,6 +69,7 @@ if (type == "deseq2") {
     eig$sample <- NULL
     coldata <- as.data.frame(colData(readRDS(snakemake@input[["dds"]])))
 
+    background <- tibble::tibble(gene_id = modules$gene_id)
     trait <- module_trait(eig, coldata, design, contrast)
     hubs <- select_hubs(modules, trait, kme_cut, module_alpha)
     cat("module association with", paste(contrast, collapse = " / "),
@@ -86,7 +89,7 @@ if (type == "deseq2") {
     prov$module_alpha <- module_alpha
     prov$n_modules_tested <- nrow(trait)
     prov$n_modules_associated <- sum(trait$padj < module_alpha)
-    prov$n_eligible <- sum(modules$module != "grey")
+    prov$n_eligible <- nrow(background)
     cat("modules associated at padj <", module_alpha, ":",
         prov$n_modules_associated, "of", nrow(trait), "\n")
     cat("hub genes at kME >=", kme_cut, ":", nrow(tab), "\n")
@@ -99,6 +102,7 @@ if (type == "deseq2") {
 
 prov$n_genes <- nrow(tab)
 write_tsv(tab, snakemake@output[["tsv"]])
+write_tsv(background, snakemake@output[["background"]])
 write_json(prov, snakemake@output[["provenance"]],
            auto_unbox = TRUE, pretty = TRUE, null = "null")
 sessionInfo()

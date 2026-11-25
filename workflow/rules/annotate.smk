@@ -24,6 +24,7 @@ rule axis_deseq2:
     output:
         tsv="results/convergence/{contrast}.axis.{axis}.tsv",
         provenance="results/convergence/{contrast}.axis.{axis}.provenance.json",
+        background="results/convergence/{contrast}.axis.{axis}.background.tsv",
     log:
         "logs/annotation/{contrast}.axis.{axis}.log",
     wildcard_constraints:
@@ -50,6 +51,7 @@ rule axis_wgcna:
     output:
         tsv="results/convergence/{contrast}.axis.{axis}.tsv",
         provenance="results/convergence/{contrast}.axis.{axis}.provenance.json",
+        background="results/convergence/{contrast}.axis.{axis}.background.tsv",
         module_trait="results/wgcna/{contrast}.{axis}.module_trait.tsv",
     log:
         "logs/annotation/{contrast}.axis.{axis}.log",
@@ -181,12 +183,23 @@ rule axis_file:
 # Convergence
 # ---------------------------------------------------------------------------
 rule convergence:
+    """Gene-level state on every axis, the overlap of each axis with the
+    reference axis, and the table of genes with any evidence."""
     input:
-        universe="results/deseq2/{contrast}.results.tsv",
+        results="results/deseq2/{contrast}.results.tsv",
         axes=axis_inputs,
         provenance=axis_provenance,
+        backgrounds=lambda w: [
+            axis_path(a["name"], w.contrast, "background.tsv")
+            for a in AXES if a["type"] in INTERNAL_TYPES
+        ],
+        orthologs=[ortholog_path(s) for s in ortholog_targets()],
+        ortholog_provenance=[
+            ortholog_path(s, "provenance.json") for s in ortholog_targets()
+        ],
     output:
-        table="results/convergence/{contrast}.convergence.tsv",
+        tsv="results/convergence/{contrast}.convergence.tsv",
+        overlap="results/convergence/{contrast}.overlap.tsv",
         plot=report("results/convergence/{contrast}.upset.png", category="Convergence"),
         provenance="results/convergence/{contrast}.provenance.json",
     log:
@@ -195,6 +208,9 @@ rule convergence:
         species=ANNOT.get("species"),
         orthologs=ANNOT.get("orthologs", True),
         require=ANNOT.get("require", []),
+        reference=reference_axis(),
+        background_axes=[a["name"] for a in AXES if a["type"] in INTERNAL_TYPES],
+        ortholog_species=ortholog_targets(),
     conda:
         "../envs/annotate.yaml"
     threads: 2
@@ -202,3 +218,23 @@ rule convergence:
         mem_mb=8000,
     script:
         "../scripts/convergence.R"
+
+
+rule orthologs:
+    """Ortholog table for one pair of species, fetched once and kept under
+    resources/annotation with the service version."""
+    input:
+        tx2gene="resources/reference/tx2gene.tsv",
+    output:
+        tsv="resources/annotation/orthologs.{src}_to_{dst}.tsv",
+        provenance="resources/annotation/orthologs.{src}_to_{dst}.provenance.json",
+    log:
+        "logs/annotation/orthologs.{src}_to_{dst}.log",
+    wildcard_constraints:
+        src="[a-z]+",
+        dst="[a-z]+",
+    retries: 2
+    conda:
+        "../envs/annotate.yaml"
+    script:
+        "../scripts/fetch_orthologs.R"

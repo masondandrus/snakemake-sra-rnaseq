@@ -14,7 +14,7 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 RULES = ["tximport", "deseq2_init", "deseq2_results", "wgcna",
-         "axis_deseq2", "axis_wgcna", "convergence"]
+         "axis_deseq2", "axis_wgcna", "axis_file", "convergence"]
 
 
 def r_ready():
@@ -124,4 +124,62 @@ def test_small_study_skips_the_network_and_says_so(small):
     assert "below the minimum" in prov["skip_reason"]
     conv = pd.read_csv(small / "results/convergence/treated_vs_control.convergence.tsv", sep="\t")
     assert not conv["HUB"].any()
-    assert conv["DEG"].all()
+    assert conv["DEG"].any()
+    assert (conv["n_evidence"] >= 1).all()
+
+
+def convergence(workdir, contrast="treated_vs_control", kind="convergence.tsv"):
+    path = workdir / f"results/convergence/{contrast}.{kind}"
+    if kind.endswith("json"):
+        return json.loads(path.read_text())
+    return pd.read_csv(path, sep="\t")
+
+
+def test_a_known_overlap_is_detected_and_a_chance_overlap_is_not(large):
+    overlap = convergence(large, kind="overlap.tsv").set_index("axis")
+    known = overlap.loc["KNOWN"]
+    assert known["reference"] == "DEG"
+    assert known["n_universe"] <= 1000
+    assert known["n_both"] >= 25
+    assert known["odds_ratio"] > 5
+    assert known["padj"] < 1e-6
+
+    tenth = overlap.loc["TENTH"]
+    assert tenth["n_universe"] == modeled_genes(large)
+    assert 0.3 < tenth["odds_ratio"] < 3
+    assert tenth["p_greater"] > 0.01
+
+
+def test_genes_without_an_ortholog_are_not_evaluable_on_a_human_axis(large):
+    prov = convergence(large, kind="provenance.json")
+    known = next(a for a in prov["axes"] if a["name"] == "KNOWN")
+    assert known["status"] == "ok"
+    assert known["n_evaluable"] <= 1000
+    assert known["n_one_to_many"] == 10
+    assert prov["ortholog_tables"][0]["gprofiler_version"] == "fixture"
+
+    table = convergence(large)
+    states = table.set_index("gene_id")["KNOWN_state"]
+    unmapped = [g for g in states.index if int(g[-5:]) >= 1000]
+    assert unmapped and (states[unmapped] == "not_evaluable").all()
+
+
+def test_a_gene_is_positive_through_its_second_ortholog(large):
+    table = convergence(large).set_index("gene_id")
+    row = table.loc["ENSMUSG00000000005"]
+    assert row["KNOWN_state"] == "positive"
+    assert bool(row["KNOWN_via_ortholog"])
+
+
+def test_axis_states_and_counts_in_the_table(large, small):
+    table = convergence(large)
+    for axis in ("DEG", "HUB", "KNOWN", "TENTH"):
+        assert set(table[f"{axis}_state"]) <= {"positive", "negative", "not_evaluable"}
+        assert (table[axis] == (table[f"{axis}_state"] == "positive")).all()
+    assert (table["n_evidence"] == table[["DEG", "HUB", "KNOWN", "TENTH"]].sum(axis=1)).all()
+
+    prov = convergence(small, kind="provenance.json")
+    hub = next(a for a in prov["axes"] if a["name"] == "HUB")
+    assert hub["status"] == "skipped"
+    assert set(convergence(small)["HUB_state"]) == {"axis_skipped"}
+    assert "HUB" not in set(convergence(small, kind="overlap.tsv")["axis"])

@@ -5,6 +5,11 @@ Genes 0-79 form a module driven by treatment, 80-159 a module unrelated to any
 factor, 160-239 a module driven by sex. Genes 240-269 change with treatment
 one by one. Gene 270 has an effect large enough to give a p-value of zero.
 Genes 271 onward are background; the last 60 have low counts.
+
+The fixture also holds an ortholog table to human for genes 0-999 (genes 0-9
+have two orthologs each, genes 1000 onward have none), a human gene list
+KNOWN that names the orthologs of genes 240-269, and a mouse gene list TENTH
+that names every tenth gene.
 """
 
 import argparse
@@ -122,6 +127,30 @@ def write(workdir: pathlib.Path, n_per_group: int, seed: int, extra_config: dict
             },
         },
     }
+    annot = workdir / "resources" / "annotation"
+    annot.mkdir(parents=True, exist_ok=True)
+    mapped = list(range(1000))
+    pairs = [(genes[g], f"ENSG{g:011d}", f"HGENE{g}") for g in mapped]
+    pairs += [(genes[g], f"ENSG9{g:010d}", f"HGENE{g}B") for g in range(10)]
+    pd.DataFrame(pairs, columns=["gene_id", "ortholog_gene_id", "ortholog_symbol"]).to_csv(
+        annot / "orthologs.mmusculus_to_hsapiens.tsv", sep="\t", index=False)
+    (annot / "orthologs.mmusculus_to_hsapiens.provenance.json").write_text(
+        '{"service": "fixture", "gprofiler_version": "fixture"}')
+
+    lists = workdir / "resources" / "fixture"
+    lists.mkdir(parents=True, exist_ok=True)
+    known = [f"ENSG{g:011d}" for g in range(240, 270)] + ["ENSG90000000005"]
+    pd.DataFrame({"gene_id": known}).to_csv(lists / "known_human.tsv", sep="\t", index=False)
+    pd.DataFrame({"gene_id": [genes[g] for g in range(0, N_GENES, 10)]}).to_csv(
+        lists / "every_tenth_mouse.tsv", sep="\t", index=False)
+    config["annotation"]["orthologs"] = True
+    config["annotation"]["axes"] += [
+        {"name": "KNOWN", "type": "file", "path": "resources/fixture/known_human.tsv",
+         "species": "Homo sapiens"},
+        {"name": "TENTH", "type": "file", "path": "resources/fixture/every_tenth_mouse.tsv",
+         "species": "Mus musculus"},
+    ]
+
     config["deseq2"]["design"] = extra_config.get("design", "~ condition")
     if extra_config.get("sex_contrast"):
         config["contrasts"]["F_vs_M"] = ["sex", "F", "M"]
